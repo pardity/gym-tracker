@@ -351,6 +351,212 @@ function calcPlates(target) {
   return { used, loaded, off: Math.round((target - loaded) * 10) / 10 };
 }
 
+
+// ─── Plate Change Calculator ──────────────────────────────────────────────────
+function PlateChangeCalc() {
+  // currentPlates: { "45":2, "35":0, "25":1, ... } — count per side
+  const [current, setCurrent] = useState({});
+  const [target,  setTarget]  = useState("");
+
+  const currentTotal = BAR + Object.entries(current).reduce((a, [w, c]) => a + parseFloat(w) * c * 2, 0);
+  const targetVal    = parseFloat(target);
+  const targetResult = target && targetVal >= BAR ? calcPlates(targetVal) : null;
+
+  // Diff: what to add/remove per side
+  const diff = targetResult ? PLATES.map(p => {
+    const have = current[String(p.weight)] || 0;
+    const need = (targetResult.used.find(u => u.weight === p.weight)?.count) || 0;
+    return { ...p, have, need, delta: need - have };
+  }).filter(p => p.delta !== 0) : [];
+
+  function togglePlate(weight) {
+    const key = String(weight);
+    const max = PLATES.find(p => p.weight === weight)?.count || 0;
+    setCurrent(c => {
+      const cur = c[key] || 0;
+      return { ...c, [key]: cur >= max ? 0 : cur + 1 };
+    });
+  }
+
+  function clearPlates() { setCurrent({}); setTarget(""); }
+
+  return (
+    <div style={{
+      background: T.card, border: `1px solid ${T.border}`,
+      borderRadius: "14px", padding: "16px", marginBottom: "14px",
+      boxShadow: T.shadow,
+    }}>
+      <div style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase",
+        letterSpacing: "0.1em", color: T.accent, marginBottom: "14px" }}>
+        Change Calculator
+      </div>
+
+      {/* Step 1: tap current plates */}
+      <div style={{ fontSize: "11px", color: T.textSoft, fontWeight: 600,
+        textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "10px" }}>
+        Step 1 — Tap plates currently loaded (per side)
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "14px" }}>
+        {PLATES.map(p => {
+          const count = current[String(p.weight)] || 0;
+          const max   = p.count;
+          return (
+            <button key={p.weight} onClick={() => togglePlate(p.weight)}
+              style={{
+                minWidth: "56px", padding: "10px 8px",
+                background: count > 0 ? p.color : T.bg,
+                border: `2px solid ${count > 0 ? p.color : T.border2}`,
+                borderRadius: "10px", cursor: "pointer",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: "3px",
+                transition: "all 0.15s", opacity: count >= max ? 0.5 : 1,
+              }}>
+              <span style={{ fontSize: "15px", fontWeight: 800,
+                color: count > 0 ? "#fff" : T.textMid }}>
+                {p.weight}
+              </span>
+              <span style={{ fontSize: "10px", fontWeight: 700,
+                color: count > 0 ? "rgba(255,255,255,0.85)" : T.textSoft }}>
+                ×{count}/{max}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Current total */}
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        background: T.accentBg, borderRadius: "8px", padding: "10px 14px",
+        marginBottom: "14px",
+      }}>
+        <span style={{ fontSize: "13px", color: T.textMid, fontWeight: 600 }}>Current bar weight</span>
+        <span style={{ fontSize: "20px", fontWeight: 800, color: T.accent }}>{currentTotal} lbs</span>
+      </div>
+
+      {/* Visual bar of current load */}
+      {Object.values(current).some(c => c > 0) && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+          gap: "2px", minHeight: "44px", marginBottom: "14px", overflowX: "auto" }}>
+          <div style={{ width: "8px", height: "36px", background: T.border2,
+            borderRadius: "3px 0 0 3px", flexShrink: 0 }} />
+          {PLATES.slice().reverse().map(p =>
+            Array.from({ length: current[String(p.weight)] || 0 }).map((_, j) => (
+              <div key={`l-${p.weight}-${j}`} style={{
+                width: "13px", flexShrink: 0,
+                height: `${Math.max(24, Math.min(50, 24 + p.weight * 0.45))}px`,
+                background: p.color, borderRadius: "2px",
+                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.2)",
+              }} />
+            ))
+          )}
+          <div style={{ height: "10px", width: "60px", flexShrink: 0,
+            background: "linear-gradient(180deg,#c8c0b8,#a0988e,#c8c0b8)",
+            borderRadius: "3px" }} />
+          {PLATES.map(p =>
+            Array.from({ length: current[String(p.weight)] || 0 }).map((_, j) => (
+              <div key={`r-${p.weight}-${j}`} style={{
+                width: "13px", flexShrink: 0,
+                height: `${Math.max(24, Math.min(50, 24 + p.weight * 0.45))}px`,
+                background: p.color, borderRadius: "2px",
+                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.2)",
+              }} />
+            ))
+          )}
+          <div style={{ width: "8px", height: "36px", background: T.border2,
+            borderRadius: "0 3px 3px 0", flexShrink: 0 }} />
+        </div>
+      )}
+
+      {/* Step 2: target weight */}
+      <div style={{ fontSize: "11px", color: T.textSoft, fontWeight: 600,
+        textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
+        Step 2 — Enter target weight
+      </div>
+
+      <input type="number" inputMode="decimal" value={target}
+        onChange={e => setTarget(e.target.value)}
+        placeholder="Target lbs"
+        style={{
+          width: "100%", background: T.card, border: `2px solid ${T.border2}`,
+          borderRadius: "10px", color: T.text, padding: "12px 14px",
+          fontSize: "18px", boxSizing: "border-box", outline: "none",
+          marginBottom: "12px", transition: "border-color 0.2s",
+        }}
+        onFocus={e => e.target.style.borderColor = T.accent}
+        onBlur={e  => e.target.style.borderColor = T.border2}
+      />
+
+      {/* Diff result */}
+      {targetResult && diff.length === 0 && (
+        <div style={{ background: T.greenBg, border: `1px solid ${T.green}40`,
+          borderRadius: "10px", padding: "12px 14px", color: T.green,
+          fontSize: "14px", fontWeight: 700, textAlign: "center" }}>
+          ✓ Already loaded! ({currentTotal} lbs)
+        </div>
+      )}
+
+      {targetResult && diff.length > 0 && (
+        <div>
+          <div style={{ fontSize: "11px", color: T.textSoft, fontWeight: 600,
+            textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
+            Changes per side
+          </div>
+          {diff.map(p => (
+            <div key={p.weight} style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "9px 12px", marginBottom: "6px", borderRadius: "9px",
+              background: p.delta > 0 ? T.greenBg : T.redBg,
+              border: `1px solid ${p.delta > 0 ? T.green : T.red}30`,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ width: "10px", height: "24px", background: p.color,
+                  borderRadius: "3px", flexShrink: 0 }} />
+                <span style={{ color: T.text, fontSize: "15px", fontWeight: 700 }}>
+                  {p.weight} lbs
+                </span>
+              </div>
+              <span style={{
+                fontSize: "15px", fontWeight: 800,
+                color: p.delta > 0 ? T.green : T.red,
+              }}>
+                {p.delta > 0 ? `+${p.delta} ADD` : `${p.delta} REMOVE`}
+              </span>
+            </div>
+          ))}
+          <div style={{ marginTop: "10px", padding: "10px 14px",
+            background: T.accentBg, borderRadius: "8px",
+            display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: T.textMid, fontWeight: 600 }}>New total</span>
+            <span style={{ color: T.accent, fontWeight: 800, fontSize: "18px" }}>
+              {targetResult.loaded} lbs
+            </span>
+          </div>
+        </div>
+      )}
+
+      {target && !targetResult && (
+        <div style={{ background: T.redBg, border: `1px solid ${T.red}40`,
+          borderRadius: "10px", padding: "12px 14px", color: T.red, fontSize: "14px" }}>
+          Below bar weight (45 lbs)
+        </div>
+      )}
+
+      {/* Clear button */}
+      {(Object.values(current).some(c => c > 0) || target) && (
+        <button onClick={clearPlates} style={{
+          width: "100%", marginTop: "12px", padding: "10px",
+          background: "transparent", border: `1px solid ${T.border2}`,
+          borderRadius: "8px", color: T.textSoft, cursor: "pointer",
+          fontSize: "13px", fontWeight: 600,
+        }}>
+          ↺ Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Default workout state ────────────────────────────────────────────────────
 function newSet() {
   return { weight: "", reps: "10", rpe: "8", actual: false };
@@ -1278,7 +1484,12 @@ export default function App() {
       <div style={{ maxWidth: "680px", margin: "0 auto", padding: "0 16px" }}>
         {view === "log"      && <LogView      workouts={workouts} setWorkouts={setWorkouts} />}
         {view === "progress" && <ProgressView workouts={workouts} />}
-        {view === "plates"   && <PlateCalcView />}
+        {view === "plates"   && (
+          <>
+            <PlateCalcView />
+            <PlateChangeCalc />
+          </>
+        )}
         {view === "password" && <PasswordView workouts={workouts} />}
       </div>
 
