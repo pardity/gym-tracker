@@ -1026,29 +1026,61 @@ function RestTimer() {
   const [seconds,  setSeconds]  = useState(0);
   const [running,  setRunning]  = useState(false);
   const [preset,   setPreset]   = useState(180);
-  const ref = useRef(null);
+  const endTimeRef = useRef(null);  // wall-clock time when timer should hit zero
+  const rafRef     = useRef(null);  // requestAnimationFrame handle
 
   useEffect(() => {
-    if (running) {
-      ref.current = setInterval(() => {
-        setSeconds(s => {
-          if (s <= 1) {
-            setRunning(false);
-            clearInterval(ref.current);
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-            return 0;
-          }
-          return s - 1;
-        });
-      }, 1000);
-    } else {
-      clearInterval(ref.current);
+    if (!running) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      return;
     }
-    return () => clearInterval(ref.current);
+
+    // On start/resume: set the absolute end time
+    if (!endTimeRef.current) {
+      endTimeRef.current = Date.now() + seconds * 1000;
+    }
+
+    function tick() {
+      const remaining = Math.round((endTimeRef.current - Date.now()) / 1000);
+      if (remaining <= 0) {
+        setSeconds(0);
+        setRunning(false);
+        endTimeRef.current = null;
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        return;
+      }
+      setSeconds(remaining);
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
+    rafRef.current = requestAnimationFrame(tick);
+
+    // Recalculate on visibility change (tab comes back to foreground)
+    function onVisible() {
+      if (document.visibilityState === "visible" && running && endTimeRef.current) {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [running]);
 
-  const start = (s) => { setSeconds(s ?? preset); setRunning(true); };
-  const stop  = () => { setRunning(false); setSeconds(0); };
+  const start = (s) => {
+    const duration = s ?? preset;
+    endTimeRef.current = Date.now() + duration * 1000;
+    setSeconds(duration);
+    setRunning(true);
+  };
+  const stop = () => {
+    setRunning(false);
+    setSeconds(0);
+    endTimeRef.current = null;
+  };
   const pct   = preset > 0 ? seconds / preset : 0;
   const urgent = seconds > 0 && seconds <= 10;
   const display = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
