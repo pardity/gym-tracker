@@ -374,8 +374,13 @@ function PlateChangeCalc() {
     const max = PLATES.find(p => p.weight === weight)?.count || 0;
     setCurrent(c => {
       const cur = c[key] || 0;
+      // Cycle: 0 → 1 → 2 → ... → max → 0
       return { ...c, [key]: cur >= max ? 0 : cur + 1 };
     });
+  }
+
+  function resetPlate(weight) {
+    setCurrent(c => ({ ...c, [String(weight)]: 0 }));
   }
 
   function clearPlates() { setCurrent({}); setTarget(""); }
@@ -394,7 +399,7 @@ function PlateChangeCalc() {
       {/* Step 1: tap current plates */}
       <div style={{ fontSize: "11px", color: T.textSoft, fontWeight: 600,
         textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "10px" }}>
-        Step 1 — Tap plates currently loaded (per side)
+        Step 1 — Tap to add · Hold to reset (per side)
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "14px" }}>
@@ -402,14 +407,23 @@ function PlateChangeCalc() {
           const count = current[String(p.weight)] || 0;
           const max   = p.count;
           return (
-            <button key={p.weight} onClick={() => togglePlate(p.weight)}
+            <button key={p.weight}
+              onClick={() => togglePlate(p.weight)}
+              onContextMenu={e => { e.preventDefault(); resetPlate(p.weight); }}
+              onPointerDown={e => {
+                const t = setTimeout(() => resetPlate(p.weight), 500);
+                e.currentTarget._resetTimer = t;
+              }}
+              onPointerUp={e => clearTimeout(e.currentTarget._resetTimer)}
+              onPointerLeave={e => clearTimeout(e.currentTarget._resetTimer)}
               style={{
                 minWidth: "56px", padding: "10px 8px",
                 background: count > 0 ? p.color : T.bg,
                 border: `2px solid ${count > 0 ? p.color : T.border2}`,
                 borderRadius: "10px", cursor: "pointer",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "3px",
-                transition: "all 0.15s", opacity: count >= max ? 0.5 : 1,
+                transition: "all 0.15s",
+                userSelect: "none", WebkitUserSelect: "none",
               }}>
               <span style={{ fontSize: "15px", fontWeight: 800,
                 color: count > 0 ? "#fff" : T.textMid }}>
@@ -417,7 +431,7 @@ function PlateChangeCalc() {
               </span>
               <span style={{ fontSize: "10px", fontWeight: 700,
                 color: count > 0 ? "rgba(255,255,255,0.85)" : T.textSoft }}>
-                ×{count}/{max}
+                {count > 0 ? `×${count}/${max}` : `/${max}`}
               </span>
             </button>
           );
@@ -574,8 +588,48 @@ function newWorkout(date) {
   };
 }
 
+// ─── Weight Suggestion (BBM double progression) ───────────────────────────────
+// Find last session's best set for a given exercise name
+function getLastSessionData(workouts, currentWorkoutId, exerciseName) {
+  for (const w of workouts) {
+    if (w.id === currentWorkoutId) continue;
+    const allSets = [
+      ...(w.mainExercise === exerciseName ? w.mainSets || [] : []),
+      ...(w.armExercise  === exerciseName ? w.armSets  || [] : []),
+    ].filter(s => s.actual && s.weight && s.reps);
+    if (allSets.length > 0) {
+      // Return the heaviest set from that session
+      return allSets.reduce((best, s) =>
+        parseFloat(s.weight) > parseFloat(best.weight) ? s : best
+      );
+    }
+  }
+  return null;
+}
+
+// BBM double progression: max reps (10-12) before adding weight
+// Returns { weight, reps, action: "add_weight"|"more_reps"|"maintain", msg }
+function getWeightSuggestion(lastSet) {
+  if (!lastSet) return null;
+  const w = parseFloat(lastSet.weight);
+  const r = parseFloat(lastSet.reps);
+  if (!w || !r) return null;
+
+  if (r >= 12) {
+    // Hit top of range — add ~5% (round to nearest 5)
+    const next = Math.round((w * 1.05) / 5) * 5;
+    return { weight: next, action: "add_weight", msg: `+5% → try ${next} lbs` };
+  } else if (r >= 10) {
+    // In range — same weight, more reps
+    return { weight: w, action: "more_reps", msg: `${w} lbs — push for more reps` };
+  } else {
+    // Below range — same weight, need more reps first
+    return { weight: w, action: "more_reps", msg: `${w} lbs — get to 10+ reps first` };
+  }
+}
+
 // ─── SetRow ───────────────────────────────────────────────────────────────────
-function SetRow({ set, idx, onChange, onDelete }) {
+function SetRow({ set, idx, onChange, onDelete, suggestion }) {
   const e1rm = calcE1RM(set.weight, set.reps, set.rpe);
   const rpeColor = set.rpe ? getRPEColor(set.rpe) : T.border2;
 
@@ -585,6 +639,7 @@ function SetRow({ set, idx, onChange, onDelete }) {
       gridTemplateColumns: "22px 1fr 1fr 56px 44px 22px",
       gap: "4px", alignItems: "center",
       padding: "8px 0",
+      paddingTop: suggestion && idx === 0 ? "22px" : "8px",
       borderBottom: `1px solid ${T.border}`,
     }}>
       <span style={{ color: T.textSoft, fontSize: "11px", fontWeight: 700, fontFamily: "monospace" }}>
@@ -593,6 +648,17 @@ function SetRow({ set, idx, onChange, onDelete }) {
 
       {/* Weight */}
       <div style={{ position: "relative" }}>
+        {suggestion && idx === 0 && (
+          <div style={{
+            position: "absolute", top: "-18px", left: 0, right: 0,
+            fontSize: "10px", fontWeight: 700,
+            color: suggestion.action === "add_weight" ? T.green : T.accent,
+            letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}>
+            ↑ {suggestion.msg}
+          </div>
+        )}
         <input
           type="number" inputMode="decimal" value={set.weight}
           placeholder="lbs"
@@ -650,7 +716,10 @@ function SetRow({ set, idx, onChange, onDelete }) {
 }
 
 // ─── ExerciseSection ──────────────────────────────────────────────────────────
-function ExerciseSection({ label, exercise, setExercise, options, sets, setSets }) {
+function ExerciseSection({ label, exercise, setExercise, options, sets, setSets, workouts, workoutId }) {
+  const lastSet   = getLastSessionData(workouts || [], workoutId, exercise);
+  const suggestion = getWeightSuggestion(lastSet);
+
   return (
     <div style={{
       background: T.card, border: `1px solid ${T.border}`,
@@ -690,6 +759,7 @@ function ExerciseSection({ label, exercise, setExercise, options, sets, setSets 
 
       {sets.map((s, i) => (
         <SetRow key={i} set={s} idx={i}
+          suggestion={suggestion}
           onChange={u => setSets(sets.map((x, j) => j === i ? u : x))}
           onDelete={() => setSets(sets.filter((_, j) => j !== i))} />
       ))}
@@ -762,6 +832,8 @@ function LogView({ workouts, setWorkouts }) {
             options={[...SQUAT_VARIATIONS, ...BENCH_VARIATIONS, ...DEADLIFT_VARIATIONS]}
             sets={current.mainSets}
             setSets={v => updateCurrent({ mainSets: v })}
+            workouts={workouts}
+            workoutId={current.id}
           />
 
           <ExerciseSection
@@ -771,6 +843,8 @@ function LogView({ workouts, setWorkouts }) {
             options={ARM_EXERCISES}
             sets={current.armSets}
             setSets={v => updateCurrent({ armSets: v })}
+            workouts={workouts}
+            workoutId={current.id}
           />
 
           {/* Notes */}
