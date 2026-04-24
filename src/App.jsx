@@ -573,7 +573,7 @@ function PlateChangeCalc() {
 
 // ─── Default workout state ────────────────────────────────────────────────────
 function newSet() {
-  return { weight: "", reps: "10", rpe: "8", actual: false };
+  return { _id: Math.random().toString(36).slice(2), weight: "", reps: "10", rpe: "8", actual: false, done: false };
 }
 
 function newWorkout(date) {
@@ -629,18 +629,20 @@ function getWeightSuggestion(lastSet) {
 }
 
 // ─── SetRow ───────────────────────────────────────────────────────────────────
-function SetRow({ set, idx, onChange, onDelete, suggestion }) {
-  const e1rm = calcE1RM(set.weight, set.reps, set.rpe);
+function SetRow({ set, idx, onChange, onDelete, suggestion, confirming, onConfirmDelete }) {
+  const e1rm     = calcE1RM(set.weight, set.reps, set.rpe);
   const rpeColor = set.rpe ? getRPEColor(set.rpe) : T.border2;
 
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: "22px 1fr 1fr 56px 44px 22px",
+      gridTemplateColumns: "22px 1fr 44px 56px 44px 28px 28px",
       gap: "4px", alignItems: "center",
       padding: "8px 0",
       paddingTop: suggestion && idx === 0 ? "22px" : "8px",
       borderBottom: `1px solid ${T.border}`,
+      opacity: set.done ? 0.55 : 1,
+      transition: "opacity 0.2s",
     }}>
       <span style={{ color: T.textSoft, fontSize: "11px", fontWeight: 700, fontFamily: "monospace" }}>
         {idx + 1}
@@ -706,19 +708,65 @@ function SetRow({ set, idx, onChange, onDelete, suggestion }) {
         {e1rm ? `~${e1rm}` : "—"}
       </span>
 
-      <button onClick={onDelete} style={{
-        background: "transparent", border: "none",
-        color: T.textSoft, cursor: "pointer", fontSize: "16px", lineHeight: 1,
-        padding: 0,
-      }}>×</button>
+      {/* Done circle */}
+      <button onClick={() => onChange({ ...set, done: !set.done })}
+        style={{
+          width: "24px", height: "24px", borderRadius: "50%",
+          border: `2px solid ${set.done ? T.green : T.border2}`,
+          background: set.done ? T.green : "transparent",
+          cursor: "pointer", padding: 0, flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "all 0.18s",
+        }}>
+        {set.done && (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <polyline points="2,6 5,9 10,3" stroke="#fff" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </button>
+
+      {/* Trash icon — tap once to confirm, tap again to delete */}
+      <button onClick={confirming ? onDelete : onConfirmDelete}
+        style={{
+          width: "24px", height: "24px", borderRadius: "6px",
+          border: `1.5px solid ${confirming ? T.red : T.border2}`,
+          background: confirming ? T.redBg : "transparent",
+          cursor: "pointer", padding: 0, flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "all 0.18s",
+        }}>
+        {confirming ? (
+          <span style={{ fontSize: "10px", fontWeight: 800, color: T.red }}>!</span>
+        ) : (
+          <svg width="11" height="12" viewBox="0 0 11 12" fill="none">
+            <path d="M1 3h9M4 3V2h3v1M2 3l.5 7h6L9 3" stroke={T.textSoft}
+              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </button>
     </div>
   );
 }
 
 // ─── ExerciseSection ──────────────────────────────────────────────────────────
 function ExerciseSection({ label, exercise, setExercise, options, sets, setSets, workouts, workoutId }) {
-  const lastSet   = getLastSessionData(workouts || [], workoutId, exercise);
+  const lastSet    = getLastSessionData(workouts || [], workoutId, exercise);
   const suggestion = getWeightSuggestion(lastSet);
+  // Confirm state — which row is pending delete confirmation
+  const [activeConfirm, setActiveConfirm] = useState(null);
+  const dismissTimer = useRef(null);
+
+  function dismiss()     { setActiveConfirm(null); clearTimeout(dismissTimer.current); }
+  function confirmDelete(i) {
+    setActiveConfirm(i);
+    clearTimeout(dismissTimer.current);
+    dismissTimer.current = setTimeout(dismiss, 3000);
+  }
+  function doDelete(i) {
+    dismiss();
+    setSets(sets.filter((_, j) => j !== i));
+  }
 
   return (
     <div style={{
@@ -745,23 +793,26 @@ function ExerciseSection({ label, exercise, setExercise, options, sets, setSets,
 
       {/* Column headers */}
       <div style={{
-        display: "grid", gridTemplateColumns: "22px 1fr 1fr 56px 44px 22px",
+        display: "grid", gridTemplateColumns: "22px 1fr 44px 56px 44px 28px 28px",
         gap: "4px", marginBottom: "2px",
       }}>
-        {["#", "Weight", "Reps", "RPE", "e1RM", ""].map((h, i) => (
+        {["#", "Weight", "Reps", "RPE", "e1RM", "✓", ""].map((h, i) => (
           <span key={i} style={{
             fontSize: "10px", color: T.textSoft, fontWeight: 600,
             textTransform: "uppercase", letterSpacing: "0.06em",
-            textAlign: i === 4 ? "right" : "left",
+            textAlign: i === 4 ? "right" : i === 5 ? "center" : "left",
           }}>{h}</span>
         ))}
       </div>
 
       {sets.map((s, i) => (
-        <SetRow key={i} set={s} idx={i}
+        <SetRow key={s._id || i} set={s} idx={i}
           suggestion={suggestion}
-          onChange={u => setSets(sets.map((x, j) => j === i ? u : x))}
-          onDelete={() => setSets(sets.filter((_, j) => j !== i))} />
+          confirming={activeConfirm === i}
+          onConfirmDelete={() => confirmDelete(i)}
+          onDelete={() => doDelete(i)}
+          onChange={u => { dismiss(); setSets(sets.map((x, j) => j === i ? u : x)); }}
+        />
       ))}
 
       <button onClick={() => setSets([...sets, newSet()])}
